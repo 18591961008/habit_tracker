@@ -42,17 +42,24 @@ jobs:
       # 步骤 6：配置 iOS 签名环境（核心步骤，无 Mac 关键）
       - name: Configure iOS signing
         run: |
-          # 1. 解码 .p12 证书并导入 macOS 钥匙串
-          echo -n "${{ secrets.IOS_P12 }}" | base64 --decode > Certificates.p12
-          security import Certificates.p12 -k ~/Library/Keychains/login.keychain-db -P "${{ secrets.IOS_P12_PASSWORD }}" -A
+          # 1. 解锁钥匙串（解决权限问题）
+          security unlock-keychain -p "" login.keychain-db
           
-          # 2. 解码并安装描述文件（mobileprovision）
+          # 2. 解码 .p12 证书并导入 macOS 钥匙串
+          echo -n "${{ secrets.IOS_P12 }}" | base64 --decode > Certificates.p12
+          security import Certificates.p12 \
+            -k ~/Library/Keychains/login.keychain-db \
+            -P "${{ secrets.IOS_P12_PASSWORD }}" \
+            -A \
+            -T /usr/bin/codesign
+          
+          # 3. 解码并安装描述文件（mobileprovision）
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           echo -n "${{ secrets.IOS_MOBILEPROVISION }}" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/HabitTracker.mobileprovision
           
-          # 3. 修改 iOS 项目的签名配置（适配 Flutter 项目）
+          # 4. 修改 iOS 项目的签名配置（适配 Flutter 项目）
           cd ios
-          # 修复 sed 命令：正确替换 Bundle ID（原命令缺少替换语法）
+          # 正确替换 Bundle ID
           sed -i '' 's/com.example.habitTracker/com.hupanfeng.habittracker/g' Runner.xcodeproj/project.pbxproj
           # 设置签名团队 ID（已填你的团队 ID：6GMTCJDKPM）
           sed -i '' 's/DEVELOPMENT_TEAM = ""/DEVELOPMENT_TEAM = "6GMTCJDKPM"/g' Runner.xcodeproj/project.pbxproj
@@ -75,7 +82,7 @@ jobs:
           # 3. 嵌入描述文件（解决 Diawi 提示缺少 mobileprovision）
           cp ~/Library/MobileDevice/Provisioning\ Profiles/HabitTracker.mobileprovision Payload/Runner.app/embedded.mobileprovision
           
-          # 4. 签名 App（使用导入的证书，修复签名参数）
+          # 4. 签名 App（使用 ad-hoc 签名，避免证书名称问题）
           codesign --force --deep --sign - --entitlements ios/Runner/Runner.entitlements Payload/Runner.app 2>/dev/null || true
           
           # 5. 压缩成 IPA 文件（iOS 标准打包方式）
