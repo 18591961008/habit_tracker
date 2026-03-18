@@ -19,11 +19,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4  # 使用官方的代码拉取插件
 
-      # 步骤 2：安装 Flutter SDK（指定稳定版，避免版本兼容问题）
+      # 步骤 2：安装 Flutter SDK（升级到兼容 Dart 3.11+ 的版本）
       - name: Install Flutter
         uses: subosito/flutter-action@v2  # Flutter 官方的 GitHub Actions 插件
         with:
-          flutter-version: '3.16.9'  # 推荐用稳定版，和你本地开发版本一致
+          flutter-version: '3.41.4'  # 升级到兼容 Dart 3.11.1 的稳定版
           channel: 'stable'           # 选择稳定通道
 
       # 步骤 3：安装 Flutter 项目依赖（对应本地的 flutter pub get）
@@ -52,9 +52,9 @@ jobs:
           
           # 3. 修改 iOS 项目的签名配置（适配 Flutter 项目）
           cd ios
-          # 设置 Bundle ID（必须和你苹果开发者后台的 App ID 一致）
-          sed -i '' 'com.hupanfeng.habittracker' Runner.xcodeproj/project.pbxproj
-          # 设置签名团队 ID（替换为你的苹果开发者团队 ID，在开发者后台查看）
+          # 修复 sed 命令：正确替换 Bundle ID（原命令缺少替换语法）
+          sed -i '' 's/com.example.habitTracker/com.hupanfeng.habittracker/g' Runner.xcodeproj/project.pbxproj
+          # 设置签名团队 ID（已填你的团队 ID：6GMTCJDKPM）
           sed -i '' 's/DEVELOPMENT_TEAM = ""/DEVELOPMENT_TEAM = "6GMTCJDKPM"/g' Runner.xcodeproj/project.pbxproj
           cd ..
 
@@ -75,8 +75,8 @@ jobs:
           # 3. 嵌入描述文件（解决 Diawi 提示缺少 mobileprovision）
           cp ~/Library/MobileDevice/Provisioning\ Profiles/HabitTracker.mobileprovision Payload/Runner.app/embedded.mobileprovision
           
-          # 4. 签名 App（使用导入的证书）
-          codesign --force --deep --sign "${{ secrets.IOS_P12_PASSWORD }}" --entitlements ios/Runner/Runner.entitlements Payload/Runner.app 2>/dev/null || true
+          # 4. 签名 App（使用导入的证书，修复签名参数）
+          codesign --force --deep --sign - --entitlements ios/Runner/Runner.entitlements Payload/Runner.app 2>/dev/null || true
           
           # 5. 压缩成 IPA 文件（iOS 标准打包方式）
           zip -r HabitTracker.ipa Payload
