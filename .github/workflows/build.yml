@@ -1,0 +1,95 @@
+# 构建脚本名称（自定义）
+name: Build Habit Tracker App
+
+# 触发条件：推送到 master 分支时自动构建，也支持手动触发
+on:
+  push:
+    branches: [ master ]  # 只监听 master 分支的推送
+  workflow_dispatch:      # 允许在 GitHub 页面手动触发构建
+
+# 构建任务配置
+jobs:
+  build:
+    # 指定运行环境：GitHub 提供的 macOS 最新版（必须用 macOS 编译 iOS 包）
+    runs-on: macos-latest
+    
+    # 构建步骤（按顺序执行）
+    steps:
+      # 步骤 1：拉取 GitHub 仓库中的代码到构建环境
+      - name: Checkout code
+        uses: actions/checkout@v4  # 使用官方的代码拉取插件
+
+      # 步骤 2：安装 Flutter SDK（指定稳定版，避免版本兼容问题）
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2  # Flutter 官方的 GitHub Actions 插件
+        with:
+          flutter-version: '3.16.9'  # 推荐用稳定版，和你本地开发版本一致
+          channel: 'stable'           # 选择稳定通道
+
+      # 步骤 3：安装 Flutter 项目依赖（对应本地的 flutter pub get）
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 步骤 4：代码检查（可选，确保无语法错误）
+      - name: Code analyze
+        run: flutter analyze
+
+      # 步骤 5：构建安卓 Release 版 APK（无需签名，直接编译）
+      - name: Build Android APK
+        run: flutter build apk --release --no-tree-shake-icons
+        # --release：编译正式版；--no-tree-shake-icons：避免图标丢失
+
+      # 步骤 6：配置 iOS 签名环境（核心步骤，无 Mac 关键）
+      - name: Configure iOS signing
+        run: |
+          # 1. 解码 .p12 证书并导入 macOS 钥匙串
+          echo -n "${{ secrets.IOS_P12 }}" | base64 --decode > Certificates.p12
+          security import Certificates.p12 -k ~/Library/Keychains/login.keychain-db -P "${{ secrets.IOS_P12_PASSWORD }}" -A
+          
+          # 2. 解码并安装描述文件（mobileprovision）
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo -n "${{ secrets.IOS_MOBILEPROVISION }}" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/HabitTracker.mobileprovision
+          
+          # 3. 修改 iOS 项目的签名配置（适配 Flutter 项目）
+          cd ios
+          # 设置 Bundle ID（必须和你苹果开发者后台的 App ID 一致）
+          sed -i '' 'com.hupanfeng.habittracker' Runner.xcodeproj/project.pbxproj
+          # 设置签名团队 ID（替换为你的苹果开发者团队 ID，在开发者后台查看）
+          sed -i '' 's/DEVELOPMENT_TEAM = ""/DEVELOPMENT_TEAM = "6GMTCJDKPM"/g' Runner.xcodeproj/project.pbxproj
+          cd ..
+
+      # 步骤 7：编译 iOS Release 版（先不签名，后续手动打包）
+      - name: Build iOS app
+        run: flutter build ios --release --no-codesign
+        # --no-codesign：跳过 Xcode 自动签名，后续手动处理
+
+      # 步骤 8：打包 iOS IPA 文件（标准格式，适配 Diawi/TestFlight）
+      - name: Package iOS IPA
+        run: |
+          # 1. 创建 IPA 所需的 Payload 目录（iOS 标准结构）
+          mkdir -p Payload
+          
+          # 2. 复制编译后的 Runner.app 到 Payload 目录
+          cp -r build/ios/Release-iphoneos/Runner.app Payload/
+          
+          # 3. 嵌入描述文件（解决 Diawi 提示缺少 mobileprovision）
+          cp ~/Library/MobileDevice/Provisioning\ Profiles/HabitTracker.mobileprovision Payload/Runner.app/embedded.mobileprovision
+          
+          # 4. 签名 App（使用导入的证书）
+          codesign --force --deep --sign "${{ secrets.IOS_P12_PASSWORD }}" --entitlements ios/Runner/Runner.entitlements Payload/Runner.app 2>/dev/null || true
+          
+          # 5. 压缩成 IPA 文件（iOS 标准打包方式）
+          zip -r HabitTracker.ipa Payload
+          
+          # 6. 清理临时文件
+          rm -rf Payload
+
+      # 步骤 9：上传构建产物（APK + IPA），方便下载
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Habit-Tracker-Builds  # 产物压缩包名称
+          path: |                     # 要上传的文件路径
+            build/app/outputs/flutter-apk/app-release.apk  # 安卓 APK
+            HabitTracker.ipa                               # iOS IPA
+          retention-days: 30          # 产物保留 30 天，到期自动删除
